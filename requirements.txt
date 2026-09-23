@@ -1,0 +1,12 @@
+# Pinned to what this project was verified against. `langchain-mcp-adapters`
+# was listed but never imported, so it's dropped rather than left to rot.
+langgraph==1.2.11
+langchain==1.4.2
+langchain-groq==1.1.3
+mcp==1.30.0
+python-dotenv==1.2.3
+pydantic==2.13.5
+
+# Tests
+pytest==9.1.1
+pytest-asyncio==1.4.0
