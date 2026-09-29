@@ -62,6 +62,39 @@ A 7-node LangGraph workflow. Only Pick Stocks and Trading Agent invoke the LLM; 
 
 The risk gate enforces hard risk limits, but does not mechanically verify the LLM's interpretation of the entry/exit strategy. That distinction is intentional: strategy judgment remains with the model, while financial constraints remain deterministic.
 
+## Layout
+
+```
+run.py                          entry point: prompts for capital, runs the graph
+src/
+├── config.py                   env vars, risk limits, fixed entry/exit rule
+├── llm.py                      shared Groq client
+├── concurrency.py              bounded-concurrency helper for LLM/MCP calls
+├── alpaca/
+│   ├── mcp_client.py           Alpaca MCP session + tool-call wrapper
+│   └── account_and_orders.py   account state, order execution, fill polling,
+│                                reconciliation, end-of-session liquidation
+├── picker/
+│   ├── universe.py             builds the tradable-universe snapshot table
+│   └── stock_picker.py         LLM watchlist selection (schema-validated, retried)
+├── analysis/
+│   └── technical.py            intraday return/volume indicators
+├── decision/
+│   └── decision.py             LLM BUY/SELL/HOLD decision (schema-constrained)
+├── risk/
+│   └── risk_gate.py            deterministic risk gate, per-cycle capital budget
+├── evaluation/
+│   └── pnl.py                  running P&L / win-loss tracking
+├── persistence/
+│   └── journal.py              JSONL event logging
+└── graph/
+    ├── nodes.py                the 7 node implementations
+    ├── build_graph.py          wires the nodes into the LangGraph pipeline
+    └── state.py                shared TradingState schema
+tests/                          mirrors src/, one test file per module
+journal/                        per-run JSONL logs (run_<id>.jsonl)
+```
+
 ## Results
 
 One complete live paper-trading session on $5,000 session capital:
