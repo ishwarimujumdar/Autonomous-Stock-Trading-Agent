@@ -10,6 +10,27 @@ def _account(**overrides):
     return base
 
 
+def test_decide_asks_for_enough_tokens_to_finish_reasoning():
+    """
+    Groq 400'd with "Tool choice is required, but model did not call a tool"
+    at max_tokens=300 - the model ran out mid-reasoning, before the output
+    tool call. Confirmed live: 5 straight decisions on a held stock fell back
+    to HOLD this way while its stop-loss should have been checked.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    from src.config import load_objective_and_constraints
+    from src.decision.decision import decide
+
+    with patch("src.decision.decision.get_llm") as mock_get_llm:
+        asyncio.run(
+            decide("AAPL", {}, [], {}, {}, load_objective_and_constraints(10000))
+        )
+        _, kwargs = mock_get_llm.call_args
+        assert kwargs["max_tokens"] >= 1200, "too tight a budget starved a reasoning model before"
+
+
 def test_max_buy_qty_matches_the_trade_size_cap():
     """
     Confirmed live: the model proposed 16 AMD shares ($9,890, ~5x the $2,000

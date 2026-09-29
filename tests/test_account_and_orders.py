@@ -1,14 +1,15 @@
-import json
+
+from types import SimpleNamespace
 
 import pytest
 
-from src.alpaca.mcp_client import MCPToolError, _payload_from_content
-from src.execution.broker import _daily_pnl_pct, execute_order, minutes_to_close, reconcile
-
-
-class _Block:
-    def __init__(self, text):
-        self.text = text
+from src.alpaca.account_and_orders import (
+    _daily_pnl_pct,
+    execute_order,
+    minutes_to_close,
+    reconcile,
+)
+from src.alpaca.mcp_client import MCPToolError, call_tool
 
 
 def test_minutes_to_close_computes_from_clock():
@@ -60,21 +61,40 @@ def test_reconcile_catches_a_position_that_should_have_closed():
     ]
 
 
-def test_mcp_falls_back_to_text_content():
-    """
-    Returning {} when structuredContent was empty turned every tool into a
-    silent no-op: prices 0, clock closed, session over before it began.
-    """
-    payload = _payload_from_content([_Block(json.dumps({"cash": "100"}))])
-    assert payload == {"cash": "100"}
+class _FakeSession:
+    """Stands in for the MCP connection, returning one canned tool result."""
+
+    def __init__(self, structured=None, is_error=False):
+        self._result = SimpleNamespace(
+            isError=is_error, structuredContent=structured, content=["raw text"]
+        )
+
+    async def call_tool(self, name, arguments):
+        return self._result
 
 
-def test_mcp_wraps_a_bare_json_list():
-    assert _payload_from_content([_Block("[1, 2]")]) == {"items": [1, 2]}
+@pytest.mark.asyncio
+async def test_call_tool_strips_the_servers_envelope():
+    wrapped = {"_alpaca_mcp_security": {"note": "x"}, "data": {"cash": "100"}}
+    assert await call_tool(_FakeSession(wrapped), "get_account_info", {}) == {"cash": "100"}
 
 
-def test_mcp_returns_none_for_unparseable_text():
-    assert _payload_from_content([_Block("not json")]) is None
+@pytest.mark.asyncio
+async def test_call_tool_returns_an_unwrapped_payload_as_is():
+    assert await call_tool(_FakeSession({"cash": "100"}), "get_account_info", {}) == {"cash": "100"}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_fails_loudly_when_no_data_comes_back():
+    """An empty result must never read as 'price 0 / market closed' and end the session quietly."""
+    with pytest.raises(MCPToolError, match="no structured data"):
+        await call_tool(_FakeSession(structured=None), "get_clock", {})
+
+
+@pytest.mark.asyncio
+async def test_call_tool_raises_on_a_tool_error():
+    with pytest.raises(MCPToolError, match="failed"):
+        await call_tool(_FakeSession(is_error=True), "place_stock_order", {})
 
 
 @pytest.mark.asyncio
@@ -95,7 +115,7 @@ async def test_execute_order_refuses_an_invalid_qty(qty):
 
 @pytest.mark.asyncio
 async def test_wait_for_fill_reports_a_missing_order_id():
-    from src.execution.broker import wait_for_fill
+    from src.alpaca.account_and_orders import wait_for_fill
 
     result = await wait_for_fill(None, None)
     assert result["status"] == "unknown"
@@ -103,7 +123,7 @@ async def test_wait_for_fill_reports_a_missing_order_id():
 
 @pytest.mark.asyncio
 async def test_wait_for_fill_returns_terminal_status(monkeypatch):
-    import src.execution.broker as broker
+    import src.alpaca.account_and_orders as broker
 
     async def fake_call_tool(client, name, arguments):
         return {"status": "filled", "filled_qty": "5", "filled_avg_price": "101.5"}
@@ -115,7 +135,7 @@ async def test_wait_for_fill_returns_terminal_status(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_wait_for_fill_degrades_when_polling_is_unsupported(monkeypatch):
-    import src.execution.broker as broker
+    import src.alpaca.account_and_orders as broker
 
     async def fake_call_tool(client, name, arguments):
         raise MCPToolError("no such tool: get_order_by_id")
